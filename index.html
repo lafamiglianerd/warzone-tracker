@@ -78,6 +78,193 @@
   </style>
 </head>
 <body>
-  <!-- contenuto invariato -->
+  <h1>Warzone Stat Tracker</h1>
+  <div class="form">
+    <div class="input-group">
+      <label for="date">📅 Data</label>
+      <input type="date" id="date" />
+    </div>
+    <div class="input-group">
+      <label for="kills">🔫 Uccisioni</label>
+      <input type="number" id="kills" />
+    </div>
+    <div class="input-group">
+      <label for="deaths">💀 Morti</label>
+      <input type="number" id="deaths" />
+    </div>
+    <div class="input-group">
+      <label for="wins">🏆 Vittoria (1 se hai vinto)</label>
+      <input type="number" id="wins" />
+    </div>
+    <button onclick="addStats()">Salva Partita</button>
+  </div>
+
+  <div class="summary-controls">
+    <label for="summaryDate">📅 Scegli la data da riepilogare</label>
+    <input type="date" id="summaryDate" />
+    <button onclick="showSummary()">📅 Mostra Riassunto Giornaliero</button>
+  </div>
+
+  <div class="dashboard">
+    <h2>📊 Dashboard</h2>
+    <canvas id="kdChart" width="400" height="200"></canvas>
+    <canvas id="winChart" width="400" height="200"></canvas>
+  </div>
+
+  <div class="history">
+    <h2>🕒 Cronologia Partite</h2>
+    <table id="historyTable">
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th>Uccisioni</th>
+          <th>Morti</th>
+          <th>Vittoria</th>
+          <th>K/D</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="dailySummary"></div>
+  </div>
+
+  <script>
+    let stats = [];
+
+    function formatDate(isoDate) {
+      const d = new Date(isoDate);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    try {
+      const stored = localStorage.getItem('warzoneStats');
+      if (stored) {
+        stats = JSON.parse(stored);
+        if (!Array.isArray(stats)) stats = [];
+        if (stats.length > 0) {
+          renderCharts();
+          renderHistory();
+        }
+      }
+    } catch (e) {
+      console.error("Errore nel parsing delle statistiche salvate", e);
+      stats = [];
+    }
+
+    function addStats() {
+      const date = document.getElementById('date').value;
+      const kills = parseInt(document.getElementById('kills').value);
+      const deaths = parseInt(document.getElementById('deaths').value);
+      const wins = parseInt(document.getElementById('wins').value);
+
+      if (!date || isNaN(kills) || isNaN(deaths) || isNaN(wins) || deaths === 0) {
+        alert('Compila tutti i campi correttamente. Il numero di morti non può essere zero.');
+        return;
+      }
+
+      const kd = (kills / deaths).toFixed(2);
+      stats.push({ date, kills, deaths, matches: 1, wins, kd: parseFloat(kd) });
+      localStorage.setItem('warzoneStats', JSON.stringify(stats));
+      renderCharts();
+      renderHistory();
+    }
+
+    function renderCharts() {
+      const aggregateByDate = {};
+      stats.forEach(entry => {
+        if (!aggregateByDate[entry.date]) {
+          aggregateByDate[entry.date] = { kills: 0, deaths: 0, wins: 0, matches: 0 };
+        }
+        aggregateByDate[entry.date].kills += entry.kills;
+        aggregateByDate[entry.date].deaths += entry.deaths;
+        aggregateByDate[entry.date].wins += entry.wins;
+        aggregateByDate[entry.date].matches += 1;
+      });
+
+      const labels = Object.keys(aggregateByDate).sort().map(formatDate);
+      const kdData = Object.values(aggregateByDate).map(d => (d.kills / d.deaths).toFixed(2));
+      const winRate = Object.values(aggregateByDate).map(d => ((d.wins / d.matches) * 100).toFixed(2));
+
+      const kdCtx = document.getElementById('kdChart').getContext('2d');
+      const winCtx = document.getElementById('winChart').getContext('2d');
+
+      if (window.kdChartInstance) window.kdChartInstance.destroy();
+      if (window.winChartInstance) window.winChartInstance.destroy();
+
+      window.kdChartInstance = new Chart(kdCtx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'K/D Ratio',
+            data: kdData,
+            borderColor: '#00ffcc',
+            backgroundColor: 'rgba(0,255,204,0.2)',
+            tension: 0.2,
+          }],
+        },
+      });
+
+      window.winChartInstance = new Chart(winCtx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Win Rate (%)',
+            data: winRate,
+            backgroundColor: '#ffcc00'
+          }]
+        }
+      });
+    }
+
+    function renderHistory() {
+      const tbody = document.querySelector('#historyTable tbody');
+      tbody.innerHTML = '';
+      stats.forEach(entry => {
+        const row = `<tr>
+          <td>${formatDate(entry.date)}</td>
+          <td>${entry.kills}</td>
+          <td>${entry.deaths}</td>
+          <td>${entry.wins}</td>
+          <td>${entry.kd}</td>
+        </tr>`;
+        tbody.innerHTML += row;
+      });
+    }
+
+    function showSummary() {
+      const date = document.getElementById('summaryDate').value;
+      if (!date) {
+        alert('Seleziona una data per visualizzare il riassunto.');
+        return;
+      }
+      const daily = stats.filter(e => e.date === date);
+      if (daily.length === 0) {
+        document.getElementById('dailySummary').innerHTML = '<p>Nessuna partita trovata per questa data.</p>';
+        return;
+      }
+      const kills = daily.reduce((sum, e) => sum + e.kills, 0);
+      const deaths = daily.reduce((sum, e) => sum + e.deaths, 0);
+      const wins = daily.reduce((sum, e) => sum + e.wins, 0);
+      const matches = daily.length;
+      const kd = (kills / deaths).toFixed(2);
+      const winRate = ((wins / matches) * 100).toFixed(2);
+      document.getElementById('dailySummary').innerHTML = `
+        <h3>📅 Riassunto del ${formatDate(date)}</h3>
+        <ul>
+          <li>Partite giocate: ${matches}</li>
+          <li>Uccisioni totali: ${kills}</li>
+          <li>Morti totali: ${deaths}</li>
+          <li>Vittorie: ${wins}</li>
+          <li>K/D Ratio: ${kd}</li>
+          <li>Win Rate: ${winRate}%</li>
+        </ul>
+      `;
+    }
+  </script>
 </body>
 </html>
